@@ -315,6 +315,12 @@
   <h1>VELOCITY<span class="accent">//</span>PROTO</h1>
   <p class="sub">Shuriken · Gun · Parry · Movement</p>
   <div class="divider"></div>
+  <div id="profileSection" style="margin-bottom:16px;">
+    <div style="font-size:11px;letter-spacing:2px;color:var(--teal);margin-bottom:8px;">프로필 선택 (독립 저장)</div>
+    <div id="profileRow" style="display:flex;gap:8px;justify-content:center;margin-bottom:14px;"></div>
+    <div style="font-size:11px;letter-spacing:2px;color:var(--teal);margin-bottom:8px;">캐릭터 선택</div>
+    <div id="charSelect" style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;"></div>
+  </div>
   <div id="resultStats">
     <div class="row"><span>FINAL SCORE</span><span id="resScore">0</span></div>
     <div class="row"><span>KILLS</span><span id="resKills">0</span></div>
@@ -859,6 +865,7 @@ function init(){
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     raycaster = new THREE.Raycaster();
     clock = new THREE.Clock();
+    loadProfileIndex(); // 마지막으로 사용한 프로필 슬롯 복원
     loadProgress(); // 저장된 코인/스킨/설정 복원 (스킨 적용 전에 로드해야 함)
     updateCoinHUD();
     buildEnvironment();
@@ -1368,7 +1375,7 @@ function doGroundPoundImpact(){
     if(!d.userData.alive) return;
     const dPos = d.position.clone(); dPos.y += 0.9;
     if(dPos.distanceTo(center) < CFG.groundPoundRadius){
-      damageDummy(d, CFG.groundPoundDamage, dPos.clone(), 'gun');
+      damageDummy(d, Math.max(1, Math.round(CFG.groundPoundDamage * getCharacter().power)), dPos.clone(), 'gun');
     }
   });
   createImpactEffect(center, 0xe8a33d, 'gun');
@@ -1707,9 +1714,11 @@ function updateCoinHUD(){
 function buildAvatarMesh(){
   const g = new THREE.Group();
   const eq = player.fashionEquipped;
+  const ch = getCharacter();
+  const isFemale = ch.gender === '여';
   const outfitItem = FASHION.outfit.find(o => o.id === eq.outfit) || FASHION.outfit[0];
   const hairItem = FASHION.hairColor.find(o => o.id === eq.hairColor) || FASHION.hairColor[0];
-  const mSkin = new THREE.MeshStandardMaterial({color:0xf0c8a0, roughness:0.8});
+  const mSkin = new THREE.MeshStandardMaterial({color: ch.skin, roughness:0.8});
   const mOutfit = new THREE.MeshStandardMaterial({color:outfitItem.color, roughness:0.7});
   const mHair = new THREE.MeshStandardMaterial({color:hairItem.color, roughness:0.6});
   const mDark = new THREE.MeshStandardMaterial({color:0x222222});
@@ -1722,7 +1731,7 @@ function buildAvatarMesh(){
   // 다리 / 몸통 / 팔 / 손
   box(0.16,0.4,0.16,mDark,-0.12,0.2,0);
   box(0.16,0.4,0.16,mDark,0.12,0.2,0);
-  box(0.5,0.55,0.28,mOutfit,0,0.68,0);
+  box(isFemale ? 0.44 : 0.5, 0.55, isFemale ? 0.25 : 0.28, mOutfit, 0, 0.68, 0);
   box(0.13,0.45,0.13,mOutfit,-0.33,0.68,0);
   box(0.13,0.45,0.13,mOutfit,0.33,0.68,0);
   box(0.13,0.12,0.13,mSkin,-0.33,0.4,0);
@@ -1773,6 +1782,11 @@ function buildAvatarMesh(){
     t.rotation.x = 0.35;
   } else if(eq.hair === 'mohawk'){
     for(let i=0;i<5;i++) box(0.08,0.16,0.08,mHair,0,1.44,-0.16+i*0.08);
+  }
+  // 여성 캐릭터: 옆머리 스트랜드 추가 (대머리 제외)
+  if(isFemale && eq.hair !== 'none'){
+    box(0.06,0.32,0.09,mHair,-0.24,1.14,0.1);
+    box(0.06,0.32,0.09,mHair,0.24,1.14,0.1);
   }
   // 악세서리
   if(eq.acc === 'halo'){
@@ -2594,7 +2608,7 @@ function updateEnergyDrinks(dt){
     const dist = Math.hypot(dx, dz);
     if(dist < pickupRadius){
       e.collected = true;
-      player.health = Math.min(CFG.maxHealth, player.health + CFG.maxHealth*CFG.energyRestorePercent);
+      player.health = Math.min(effMaxHealth(), player.health + effMaxHealth()*CFG.energyRestorePercent);
       updateHealthHUD();
       showEnergyPickupFx(e.mesh.position.clone());
       AudioSys.play('pickup');
@@ -3417,7 +3431,7 @@ function damageDummy(d, amount, hitPos, weaponType){
     player.coins += coinReward;
     updateCoinHUD();
     if(hasUpgrade('vampire')){ // 흡혈: 처치 시 체력 회복
-      player.health = Math.min(CFG.maxHealth, player.health + 5);
+      player.health = Math.min(effMaxHealth(), player.health + 5);
       updateHealthHUD();
     }
     killDummyFx(d);
@@ -3545,9 +3559,10 @@ function updateLevelHUD(){
   document.getElementById('targetVal').textContent = stageKillsDone + ' / ' + stageKillsTotal + (remaining>0 ? '' : ' ✓');
 }
 function updateHealthHUD(){
-  const pct = Math.max(0, player.health/CFG.maxHealth*100);
+  const maxHp = effMaxHealth();
+  const pct = Math.max(0, player.health/maxHp*100);
   document.getElementById('healthBarFill').style.width = pct+'%';
-  document.getElementById('healthVal').textContent = Math.max(0,Math.round(player.health)) + ' / ' + CFG.maxHealth;
+  document.getElementById('healthVal').textContent = Math.max(0,Math.round(player.health)) + ' / ' + maxHp;
 }
 function updateWeaponHUD(){
   document.getElementById('wslot-shuriken').classList.toggle('active', player.weapon==='shuriken');
@@ -3620,7 +3635,7 @@ function killPlayer(){
   setTimeout(()=>{
     if(!gameRunning) return;
     player.dead = false;
-    player.health = CFG.maxHealth;
+    player.health = effMaxHealth();
     updateHealthHUD();
     document.getElementById('deathOverlay').style.display = 'none';
     yawObject.position.set(0, CFG.playerHeight, 10);
@@ -3687,8 +3702,9 @@ function updateMovement(dt){
     if(moveVec.lengthSq() > 1) moveVec.normalize();
     moveVec.applyQuaternion(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), yawObject.rotation.y));
     const control = player.onGround ? 1 : CFG.airControl;
-    player.vel.x = THREE.MathUtils.lerp(player.vel.x, moveVec.x*CFG.walkSpeed, control);
-    player.vel.z = THREE.MathUtils.lerp(player.vel.z, moveVec.z*CFG.walkSpeed, control);
+    const spd = CFG.walkSpeed * getCharacter().speed; // 캐릭터별 이동속도
+    player.vel.x = THREE.MathUtils.lerp(player.vel.x, moveVec.x*spd, control);
+    player.vel.z = THREE.MathUtils.lerp(player.vel.z, moveVec.z*spd, control);
   }
   updateDash(dt);
   updateSlide(dt);
@@ -3830,7 +3846,7 @@ function startGame(resumeSave){
     return;
   }
   player.score=0; player.level=1; player.kills=0; player.combo=0; player.bestCombo=0; player.topSpeed=0;
-  player.health = CFG.maxHealth; player.dead = false;
+  player.health = effMaxHealth(); player.dead = false;
   player.ammo = effMagSize(); player.reloading = false;
   player.weapon = 'shuriken';
   player.shurikenCd = 0; player.shurikenCount = effShurikenMax(); player.shurikenRegenTimer = 0;
@@ -3895,6 +3911,7 @@ document.getElementById('startBtn').addEventListener('click', ()=>startGame(null
 document.getElementById('continueBtn').addEventListener('click', ()=>startGame(getRunSave()));
 init();
 updateContinueBtn();
+renderProfileUI();
 animate();
 // build: shop weapon upgrades + gun models v2
 })();
