@@ -1604,14 +1604,17 @@ function rebuildGunModel(modelId){
   if(!COSMETICS.gunModel.find(m => m.id === modelId)) modelId = 'standard';
   currentGunModelId = modelId;
   clearGunGroup();
-  const B = gunBodyMat, A = gunAccentMat;
+  buildGunModelInto(gunGroup, modelId, gunBodyMat, gunAccentMat);
+}
+// 지정한 그룹에 총기 모델 메시 생성 — 1인칭 뷰모델과 아바타 미리보기가 공용으로 사용
+function buildGunModelInto(target, modelId, B, A){
   function add(geo, mat, x, y, z, rx, ry, rz){
     const m = new THREE.Mesh(geo, mat);
     m.position.set(x||0, y||0, z||0);
     if(rx) m.rotation.x = rx;
     if(ry) m.rotation.y = ry;
     if(rz) m.rotation.z = rz;
-    gunGroup.add(m);
+    target.add(m);
     return m;
   }
   // 공통 그립
@@ -1810,6 +1813,40 @@ function buildAvatarMesh(){
     box(0.46,0.1,0.3,mScarf,0,0.95,0.05);
     box(0.1,0.25,0.05,mScarf,0.12,0.8,0.16);
   }
+  // --- 장착 무기 표시: 오른손에 총기(모델+스킨), 왼손에 표창, 특수무기는 어깨 옆 부유 ---
+  const gunSkin = COSMETICS.gun.find(it => it.id === player.equipped.gun) || COSMETICS.gun[0];
+  const dispB = new THREE.MeshStandardMaterial({color:gunSkin.body, roughness:0.4, metalness:0.6});
+  const dispA = new THREE.MeshStandardMaterial({color:gunSkin.accent, emissive:gunSkin.accent, emissiveIntensity:0.4});
+  const gunDisp = new THREE.Group();
+  buildGunModelInto(gunDisp, player.equipped.gunModel, dispB, dispA);
+  gunDisp.scale.setScalar(1.15);
+  gunDisp.position.set(0.44, 0.52, 0.16);
+  gunDisp.rotation.y = Math.PI - 0.35; // 총구가 아바타 앞쪽(+z)을 향하도록
+  g.add(gunDisp);
+  // 표창 (장착 스킨 색상, 왼손 위에 눕혀서)
+  const shurColor = getEquippedColor('shuriken', 0xd8dbd6);
+  const mShur = new THREE.MeshStandardMaterial({color:shurColor, metalness:0.8, roughness:0.25});
+  const shurGroup = new THREE.Group();
+  shurGroup.add(new THREE.Mesh(new THREE.BoxGeometry(0.3,0.02,0.1), mShur));
+  shurGroup.add(new THREE.Mesh(new THREE.BoxGeometry(0.1,0.02,0.3), mShur));
+  [{x:0.17, z:0, ry:Math.PI/2},{x:-0.17, z:0, ry:-Math.PI/2},{x:0, z:0.17, ry:0},{x:0, z:-0.17, ry:Math.PI}].forEach(p=>{
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.05,0.09,4), mShur);
+    tip.rotation.x = -Math.PI/2;
+    tip.rotation.z = p.ry;
+    tip.position.set(p.x, 0, p.z);
+    shurGroup.add(tip);
+  });
+  shurGroup.position.set(-0.46, 0.52, 0.14);
+  shurGroup.rotation.x = Math.PI/2.6;
+  g.add(shurGroup);
+  // 특수무기 보유 시 (진행 중인 런에서만) 어깨 옆에 표시
+  if(player.specialWeapon && SPECIAL_WEAPONS[player.specialWeapon.id]){
+    const spInfo = SPECIAL_WEAPONS[player.specialWeapon.id];
+    const mSp = new THREE.MeshStandardMaterial({color:spInfo.color, emissive:spInfo.color, emissiveIntensity:0.6});
+    const sp = new THREE.Mesh(new THREE.OctahedronGeometry(0.09,0), mSp);
+    sp.position.set(-0.52, 1.32, 0);
+    g.add(sp);
+  }
   return g;
 }
 let avatarScene = null, avatarCam = null, avatarRenderer = null, avatarGroup = null, avatarLoopRunning = false;
@@ -1903,6 +1940,7 @@ function equipItem(category, id){
   updateWeaponHUD();
   renderShop();
   saveProgress();
+  if(avatarScene) rebuildAvatarPreview(); // 총기 스킨/모델 변경을 아바타 옆 무기에도 반영
 }
 function buyUpgrade(id){
   const u = UPGRADES.find(x => x.id === id);
