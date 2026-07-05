@@ -247,7 +247,7 @@
       <div id="healthVal">100 / 100</div>
     </div>
     <div id="scorePanel" class="panel">
-      <div class="label">SCORE <span id="levelBadge">LV.<span id="levelVal">1</span></span></div>
+      <div class="label">SCORE <span id="levelBadge"><span id="levelVal">1</span>층</span></div>
       <div class="value" id="scoreVal">0</div>
       <div id="targetLine">KILLS <span id="targetVal">0 / 10</span></div>
       <div id="coinDisplay">COIN <span id="coinVal">0</span></div>
@@ -304,6 +304,10 @@
     <h2>SHOP<span>//</span>외형</h2>
     <div id="shopCoinBadge">COIN <span id="shopCoinVal">0</span></div>
   </div>
+  <div id="avatarPreviewWrap" style="display:flex;flex-direction:column;align-items:center;gap:6px;margin-bottom:18px;">
+    <canvas id="avatarPreview" width="180" height="200" style="background:rgba(240,247,243,0.05);border:1px solid rgba(0,139,154,0.35);border-radius:8px;"></canvas>
+    <div style="color:rgba(240,247,243,0.6);font-size:10px;letter-spacing:2px;">내 아바타 (자동 회전)</div>
+  </div>
   <div id="shopItems"></div>
   <button id="shopCloseBtn">닫기 (ESC)</button>
 </div>
@@ -327,6 +331,7 @@
     <div class="row"><span class="k">SPACE</span><span class="v">점프 / 더블점프 / 월런</span></div>
     <div class="row"><span class="k">WASD</span><span class="v">이동</span></div>
     <div class="row"><span class="k">M</span><span class="v">사운드 음소거</span></div>
+    <div class="row"><span class="k">P</span><span class="v">진행 저장 (이어하기용)</span></div>
   </div>
   <p style="font-size:10px;color:rgba(240,247,243,0.5);letter-spacing:0.5px;margin:-8px 0 14px;">코인·스킨은 자동 저장됩니다 · 스테이지 클리어 후 8초간 아이템 회수 시간</p>
   <p style="font-size:11px;color:rgba(232,163,61,0.75);letter-spacing:0.5px;margin:-10px 0 18px;max-width:380px;">⚠ 목표물이 배회하며 사거리 안에 들어오면 원거리 반격합니다. 머리가 붉게 번쩍이면 곧 발사 신호입니다 — 패링으로 막아보세요.</p>
@@ -340,6 +345,7 @@
   </div>
   <div style="display:flex;gap:12px;">
     <button id="startBtn">시작</button>
+    <button id="continueBtn" style="display:none;font-family:inherit;background:transparent;color:var(--teal);border:1px solid var(--teal);padding:15px 30px;font-size:14px;letter-spacing:2px;font-weight:700;border-radius:2px;cursor:pointer;">이어하기</button>
     <button id="startShopBtn">상점</button>
   </div>
 </div>
@@ -414,6 +420,7 @@ const CFG = {
   stageBossInterval: 5,           // 이 배수 스테이지마다 보스 등장 + 무기 아이템 드롭
   bossSizeMult: 2,
   bossHealthMult: 5,
+  megaBossHealthMult: 10, // 10층 단위(10, 20, 30...) 메가 보스는 체력 10배
   // 중급 타겟(무지개색) — 처치 시 반드시 아이템 하나 드롭 (종류는 아래 테이블에서 가중치로 결정)
   midTierChancePerDummy: 0.3,   // 일반 목표물 중 이 비율만큼 중급 타겟으로 지정 (드롭 빈도 개선: 0.2→0.3)
   midTierDropChance: 1.0,       // 드롭 확률 100% (기존 0.5는 아이템이 너무 안 나오는 원인)
@@ -498,6 +505,20 @@ const COSMETICS = {
     {id:'arctic',     name:'ARCTIC',         body:0xc7ccc9, accent:0x008b9a, cost:100},
     {id:'royal',      name:'ROYAL PLUM',     body:0x2a2e2c, accent:0x72256b, cost:120},
   ],
+  // 총기 모델 (모양) — 11종, 색상 스킨과 독립적으로 적용됨
+  gunModel: [
+    {id:'standard', name:'STANDARD',     glyph:'▬', cost:0},
+    {id:'heavy',    name:'HEAVY CANNON', glyph:'█', cost:120},
+    {id:'smg',      name:'SMG',          glyph:'≡', cost:120},
+    {id:'sniper',   name:'SNIPER',       glyph:'⌐', cost:150},
+    {id:'plasma',   name:'PLASMA',       glyph:'◉', cost:200},
+    {id:'shotgun',  name:'SHOTGUN',      glyph:'∥', cost:150},
+    {id:'revolver', name:'REVOLVER',     glyph:'◎', cost:130},
+    {id:'railgun',  name:'RAILGUN',      glyph:'⚡', cost:220},
+    {id:'crystal',  name:'CRYSTAL',      glyph:'◆', cost:250},
+    {id:'blaster',  name:'BLASTER',      glyph:'►', cost:180},
+    {id:'minigun',  name:'MINIGUN',      glyph:'☰', cost:300},
+  ],
   crosshair: [
     {id:'teal',    name:'TEAL',    color:'#008b9a', cost:0},
     {id:'amber',   name:'AMBER',   color:'#e8a33d', cost:40},
@@ -505,6 +526,81 @@ const COSMETICS = {
     {id:'white',   name:'WHITE',   color:'#f0f7f3', cost:40},
   ],
 };
+// ============================================================
+// WEAPON UPGRADES — 상점에서 코인으로 구매하는 영구 강화 5종
+// ============================================================
+const UPGRADES = [
+  {id:'dmg2x',     name:'DAMAGE x2',        icon:'⚔', desc:'총·표창 대미지 2배',        cost:400},
+  {id:'explosive', name:'EXPLOSIVE ROUNDS', icon:'✸', desc:'총알이 폭발, 범위 피해',     cost:500},
+  {id:'rapid',     name:'RAPID FIRE',       icon:'»',  desc:'연사 속도 2배',             cost:350},
+  {id:'bigmag',    name:'EXTENDED MAG',     icon:'▤', desc:'탄창 +20, 표창 최대 +3',    cost:300},
+  {id:'vampire',   name:'VAMPIRE',          icon:'♥', desc:'처치 시 체력 +5 회복',      cost:450},
+];
+// ============================================================
+// CHARACTERS — 스탯이 다른 플레이어블 캐릭터 3종 (남/여)
+// ============================================================
+const CHARACTERS = [
+  {id:'seojun',  name:'서준', gender:'남', title:'VANGUARD', desc:'균형형 — 모든 능력이 무난',      hp:1.0,  power:1.0,  speed:1.0,  skin:0xf0c8a0},
+  {id:'arin',    name:'아린', gender:'여', title:'STRIKER',  desc:'공격형 — 강력하지만 체력 낮음',  hp:0.8,  power:1.35, speed:1.1,  skin:0xf5d5b5},
+  {id:'muyeong', name:'무영', gender:'남', title:'BULWARK',  desc:'방어형 — 튼튼하지만 느림',       hp:1.5,  power:0.85, speed:0.9,  skin:0xd9ab7e},
+];
+function getCharacter(){
+  return CHARACTERS.find(c => c.id === player.character) || CHARACTERS[0];
+}
+function effMaxHealth(){
+  return Math.round(CFG.maxHealth * getCharacter().hp);
+}
+// ============================================================
+// FASHION SHOP — 주인공 아바타 꾸미기 (헤어/얼굴/의상/악세서리)
+// ============================================================
+const FASHION = {
+  hair: [
+    {id:'short',    name:'SHORT CUT', glyph:'▬', cost:0},
+    {id:'spiky',    name:'SPIKY',     glyph:'ㅅ', cost:60},
+    {id:'bob',      name:'BOB',       glyph:'◓', cost:60},
+    {id:'ponytail', name:'PONYTAIL',  glyph:'⌒', cost:80},
+    {id:'mohawk',   name:'MOHAWK',    glyph:'▲', cost:100},
+    {id:'none',     name:'BALD',      glyph:'○', cost:40},
+  ],
+  hairColor: [
+    {id:'gold',    name:'GOLD',    color:0xe8b64d, cost:0},
+    {id:'black',   name:'BLACK',   color:0x2a2a2e, cost:30},
+    {id:'crimson', name:'CRIMSON', color:0xc73e3e, cost:30},
+    {id:'teal',    name:'TEAL',    color:0x008b9a, cost:30},
+    {id:'plum',    name:'PLUM',    color:0x72256b, cost:30},
+    {id:'white',   name:'WHITE',   color:0xf0f7f3, cost:50},
+  ],
+  face: [
+    {id:'normal', name:'NORMAL', glyph:'• •', cost:0},
+    {id:'happy',  name:'HAPPY',  glyph:'^ ^', cost:40},
+    {id:'wink',   name:'WINK',   glyph:'~ •', cost:40},
+    {id:'angry',  name:'ANGRY',  glyph:'ㅡㅡ+', cost:40},
+    {id:'sleepy', name:'SLEEPY', glyph:'- -', cost:40},
+  ],
+  outfit: [
+    {id:'teal',    name:'TEAL SUIT',    color:0x0e6b75, cost:0},
+    {id:'crimson', name:'CRIMSON SUIT', color:0x9a3030, cost:60},
+    {id:'forest',  name:'FOREST SUIT',  color:0x105742, cost:60},
+    {id:'void',    name:'VOID SUIT',    color:0x24242a, cost:80},
+    {id:'gold',    name:'GOLD SUIT',    color:0xb8860b, cost:120},
+  ],
+  acc: [
+    {id:'none',     name:'NONE',        glyph:'—', cost:0},
+    {id:'headband', name:'HEADBAND',    glyph:'▭', cost:50},
+    {id:'glasses',  name:'GLASSES',     glyph:'∞', cost:70},
+    {id:'scarf',    name:'SCARF',       glyph:'≋', cost:70},
+    {id:'horns',    name:'DEVIL HORNS', glyph:'ΛΛ', cost:100},
+    {id:'halo',     name:'HALO',        glyph:'◯', cost:120},
+  ],
+};
+const FASHION_LABELS = { hair:'헤어 스타일', hairColor:'헤어 색상', face:'얼굴 표정', outfit:'의상', acc:'악세서리' };
+function hasUpgrade(id){ return !!player.upgrades[id]; }
+// 업그레이드 + 캐릭터 파워가 반영된 실효 수치 — CFG 원본은 건드리지 않음
+function effGunDamage(){ return Math.round(CFG.gunDamage * (hasUpgrade('dmg2x') ? 2 : 1) * getCharacter().power); }
+function effShurikenDamage(){ return Math.round(CFG.shurikenDamage * (hasUpgrade('dmg2x') ? 2 : 1) * getCharacter().power); }
+function effFireRate(){ return CFG.gunFireRate / (hasUpgrade('rapid') ? 2 : 1); }
+function effMagSize(){ return CFG.gunMagSize + (hasUpgrade('bigmag') ? 20 : 0); }
+function effShurikenMax(){ return CFG.shurikenMax + (hasUpgrade('bigmag') ? 3 : 0); }
 // ============================================================
 // SPECIAL WEAPONS (rare boss drops, limited charges, unique skills)
 // ============================================================
@@ -521,7 +617,7 @@ const KEYMAP = {
   jump: 'Space', dash: 'ShiftLeft', dashAlt: 'ShiftRight',
   slide: 'ControlLeft', slideAlt: 'ControlRight',
   parry: 'KeyF', swapWeapon: 'KeyQ', reload: 'KeyR', shop: 'KeyB', special: 'KeyG',
-  mute: 'KeyM',
+  mute: 'KeyM', saveGame: 'KeyP',
 };
 // ============================================================
 // AUDIO — Web Audio 신스 SFX + BGM (외부 파일 없음, M키 음소거)
@@ -617,13 +713,27 @@ const AudioSys = (function(){
 // SAVE / LOAD (localStorage) — 코인, 스킨, 음소거 설정 세션 간 유지
 // ============================================================
 const SAVE_KEY = 'velocity_proto_save_v1';
+// ---- 프로필 시스템: 3개 슬롯, 각자 독립된 저장 데이터 (코인/스킨/업그레이드/패션/런) ----
+const PROFILE_IDX_KEY = 'velocity_profile_idx';
+let profileIndex = 0;
+function saveKeyFor(i){ return SAVE_KEY + '_p' + i; }
+function runKeyFor(i){ return RUN_KEY + '_p' + i; }
+function loadProfileIndex(){
+  try {
+    profileIndex = Math.min(2, Math.max(0, parseInt(localStorage.getItem(PROFILE_IDX_KEY) || '0', 10) || 0));
+  } catch(e){ profileIndex = 0; }
+}
 let loadedSave = null;
 function saveProgress(){
   try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify({
+    localStorage.setItem(saveKeyFor(profileIndex), JSON.stringify({
       coins: player.coins,
       owned: player.owned,
       equipped: player.equipped,
+      upgrades: player.upgrades,
+      character: player.character,
+      fashionOwned: player.fashionOwned,
+      fashionEquipped: player.fashionEquipped,
       muted: AudioSys.isMuted(),
       bestScore: Math.max(player.score, (loadedSave && loadedSave.bestScore) || 0),
     }));
@@ -631,15 +741,24 @@ function saveProgress(){
 }
 function loadProgress(){
   try {
-    const raw = localStorage.getItem(SAVE_KEY);
+    // 프로필 1은 구버전(프로필 없던 시절) 저장 데이터도 이어받음
+    const raw = localStorage.getItem(saveKeyFor(profileIndex)) || (profileIndex === 0 ? localStorage.getItem(SAVE_KEY) : null);
     if(!raw) return;
     const s = JSON.parse(raw);
     loadedSave = s;
     if(typeof s.coins === 'number') player.coins = s.coins;
-    ['shuriken','gun','crosshair'].forEach(c=>{
+    ['shuriken','gun','gunModel','crosshair'].forEach(c=>{
       if(s.owned && Array.isArray(s.owned[c]) && s.owned[c].length) player.owned[c] = s.owned[c];
       if(s.equipped && s.equipped[c] && player.owned[c].includes(s.equipped[c])) player.equipped[c] = s.equipped[c];
     });
+    if(s.upgrades && typeof s.upgrades === 'object') player.upgrades = Object.assign({}, s.upgrades);
+    if(s.character && CHARACTERS.find(c => c.id === s.character)) player.character = s.character;
+    if(s.fashionOwned && typeof s.fashionOwned === 'object'){
+      Object.keys(FASHION).forEach(c=>{
+        if(Array.isArray(s.fashionOwned[c]) && s.fashionOwned[c].length) player.fashionOwned[c] = s.fashionOwned[c];
+        if(s.fashionEquipped && s.fashionEquipped[c] && player.fashionOwned[c].includes(s.fashionEquipped[c])) player.fashionEquipped[c] = s.fashionEquipped[c];
+      });
+    }
     if(s.muted) AudioSys.setMuted(true);
   } catch(e){}
 }
@@ -666,8 +785,12 @@ const player = {
   score: 0,
   level: 1,
   coins: 0,
-  owned: { shuriken: ['silver'], gun: ['standard'], crosshair: ['teal'] },
-  equipped: { shuriken: 'silver', gun: 'standard', crosshair: 'teal' },
+  owned: { shuriken: ['silver'], gun: ['standard'], gunModel: ['standard'], crosshair: ['teal'] },
+  equipped: { shuriken: 'silver', gun: 'standard', gunModel: 'standard', crosshair: 'teal' },
+  upgrades: {}, // 구매한 무기 업그레이드 (id → true)
+  character: 'seojun', // 선택한 캐릭터 id
+  fashionOwned: { hair:['short'], hairColor:['gold'], face:['normal'], outfit:['teal'], acc:['none'] },
+  fashionEquipped: { hair:'short', hairColor:'gold', face:'normal', outfit:'teal', acc:'none' },
   kills: 0,
   combo: 0,
   bestCombo: 0,
@@ -1031,6 +1154,7 @@ function onKeyPress(code){
   }
   if(!gameRunning || player.dead) return;
   if(code === KEYMAP.shop){ openShop(); return; }
+  if(code === KEYMAP.saveGame){ saveRunState(true); saveProgress(); return; }
   if(code === KEYMAP.jump) tryJumpOrWallJump();
   if(code === KEYMAP.dash || code === KEYMAP.dashAlt) tryDash();
   if(code === KEYMAP.slide || code === KEYMAP.slideAlt) tryStartSlide();
@@ -1423,21 +1547,7 @@ function buildViewmodels(){
   gunGroup = new THREE.Group();
   gunBodyMat = new THREE.MeshStandardMaterial({color:0x2a2e2c, roughness:0.4, metalness:0.6});
   gunAccentMat = new THREE.MeshStandardMaterial({color:0x008b9a, emissive:0x008b9a, emissiveIntensity:0.4});
-  const bodyMat = gunBodyMat;
-  const accentMat = gunAccentMat;
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.1,0.12,0.5), bodyMat);
-  gunGroup.add(body);
-  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.025,0.025,0.35,8), bodyMat);
-  barrel.rotation.x = Math.PI/2;
-  barrel.position.set(0,0.02,-0.4);
-  gunGroup.add(barrel);
-  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.08,0.22,0.09), bodyMat);
-  grip.position.set(0,-0.14,0.15);
-  grip.rotation.x = 0.3;
-  gunGroup.add(grip);
-  const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.11,0.02,0.15), accentMat);
-  stripe.position.set(0,0.04,0.1);
-  gunGroup.add(stripe);
+  // 총기 메시는 rebuildGunModel()이 장착된 모델에 맞춰 생성 (applyEquippedCosmetics에서 호출)
   gunGroup.position.set(0.22,-0.22,-0.5);
   gunGroup.visible = false;
   camera.add(gunGroup);
@@ -1471,6 +1581,102 @@ function getEquippedColor(category, fallback){
   const item = COSMETICS[category].find(it => it.id === id);
   return item ? item.color : fallback;
 }
+// ============================================================
+// GUN MODELS — 11종의 총기 모양을 절차적으로 생성 (색상 스킨과 독립)
+// ============================================================
+let currentGunModelId = null;
+function clearGunGroup(){
+  for(let i=gunGroup.children.length-1;i>=0;i--){
+    const c = gunGroup.children[i];
+    gunGroup.remove(c);
+    if(c.geometry) c.geometry.dispose(); // 공유 재질(gunBodyMat 등)은 dispose하지 않음
+  }
+}
+function rebuildGunModel(modelId){
+  if(!gunGroup) return;
+  if(!COSMETICS.gunModel.find(m => m.id === modelId)) modelId = 'standard';
+  currentGunModelId = modelId;
+  clearGunGroup();
+  const B = gunBodyMat, A = gunAccentMat;
+  function add(geo, mat, x, y, z, rx, ry, rz){
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x||0, y||0, z||0);
+    if(rx) m.rotation.x = rx;
+    if(ry) m.rotation.y = ry;
+    if(rz) m.rotation.z = rz;
+    gunGroup.add(m);
+    return m;
+  }
+  // 공통 그립
+  add(new THREE.BoxGeometry(0.08,0.22,0.09), B, 0,-0.14,0.15, 0.3);
+  switch(modelId){
+    case 'heavy': // 두꺼운 몸통 + 대구경 포신
+      add(new THREE.BoxGeometry(0.14,0.16,0.55), B);
+      add(new THREE.CylinderGeometry(0.05,0.05,0.4,10), B, 0,0.02,-0.45, Math.PI/2);
+      add(new THREE.CylinderGeometry(0.07,0.07,0.08,10), A, 0,0.02,-0.62, Math.PI/2);
+      add(new THREE.BoxGeometry(0.15,0.03,0.2), A, 0,0.09,0);
+      break;
+    case 'smg': // 컴팩트 기관단총 + 긴 탄창
+      add(new THREE.BoxGeometry(0.09,0.1,0.32), B);
+      add(new THREE.CylinderGeometry(0.02,0.02,0.18,8), B, 0,0.02,-0.24, Math.PI/2);
+      add(new THREE.BoxGeometry(0.05,0.2,0.07), A, 0,-0.15,-0.02, 0.1);
+      break;
+    case 'sniper': // 장총신 + 스코프
+      add(new THREE.BoxGeometry(0.08,0.1,0.6), B);
+      add(new THREE.CylinderGeometry(0.018,0.018,0.6,8), B, 0,0.02,-0.58, Math.PI/2);
+      add(new THREE.CylinderGeometry(0.035,0.035,0.16,10), A, 0,0.1,-0.1, Math.PI/2);
+      break;
+    case 'plasma': // 발광 코어 + 이중 링
+      add(new THREE.BoxGeometry(0.11,0.12,0.42), B);
+      add(new THREE.SphereGeometry(0.06,10,10), A, 0,0.02,-0.28);
+      add(new THREE.TorusGeometry(0.06,0.012,8,16), A, 0,0.02,-0.4);
+      add(new THREE.TorusGeometry(0.05,0.012,8,16), A, 0,0.02,-0.5);
+      break;
+    case 'shotgun': // 쌍열 총신 + 펌프
+      add(new THREE.BoxGeometry(0.11,0.12,0.4), B);
+      add(new THREE.CylinderGeometry(0.022,0.022,0.42,8), B, -0.028,0.03,-0.42, Math.PI/2);
+      add(new THREE.CylinderGeometry(0.022,0.022,0.42,8), B, 0.028,0.03,-0.42, Math.PI/2);
+      add(new THREE.BoxGeometry(0.08,0.05,0.14), A, 0,-0.04,-0.35);
+      break;
+    case 'revolver': // 실린더 드럼
+      add(new THREE.BoxGeometry(0.07,0.09,0.3), B);
+      add(new THREE.CylinderGeometry(0.05,0.05,0.1,8), A, 0,-0.01,-0.08, Math.PI/2);
+      add(new THREE.CylinderGeometry(0.02,0.02,0.28,8), B, 0,0.02,-0.32, Math.PI/2);
+      break;
+    case 'railgun': // 평행 레일 + 가속 코일 3개
+      add(new THREE.BoxGeometry(0.12,0.13,0.3), B, 0,0,0.1);
+      add(new THREE.BoxGeometry(0.02,0.05,0.55), B, -0.035,0.02,-0.3);
+      add(new THREE.BoxGeometry(0.02,0.05,0.55), B, 0.035,0.02,-0.3);
+      add(new THREE.TorusGeometry(0.05,0.012,8,14), A, 0,0.02,-0.2);
+      add(new THREE.TorusGeometry(0.05,0.012,8,14), A, 0,0.02,-0.38);
+      add(new THREE.TorusGeometry(0.05,0.012,8,14), A, 0,0.02,-0.54);
+      break;
+    case 'crystal': // 크리스탈 총구
+      add(new THREE.BoxGeometry(0.1,0.11,0.34), B);
+      add(new THREE.OctahedronGeometry(0.07,0), A, 0,0.02,-0.32);
+      add(new THREE.OctahedronGeometry(0.035,0), A, 0,0.1,-0.05);
+      break;
+    case 'blaster': // 콘형 총구 + 측면 핀
+      add(new THREE.BoxGeometry(0.1,0.12,0.36), B);
+      add(new THREE.ConeGeometry(0.055,0.18,10), A, 0,0.02,-0.36, -Math.PI/2);
+      add(new THREE.BoxGeometry(0.02,0.09,0.16), B, -0.065,0.02,0);
+      add(new THREE.BoxGeometry(0.02,0.09,0.16), B, 0.065,0.02,0);
+      break;
+    case 'minigun': // 6연장 회전 총신
+      add(new THREE.BoxGeometry(0.14,0.15,0.35), B, 0,0,0.08);
+      for(let i=0;i<6;i++){
+        const ang = (i/6)*Math.PI*2;
+        add(new THREE.CylinderGeometry(0.014,0.014,0.4,6), B, Math.cos(ang)*0.045, 0.02+Math.sin(ang)*0.045, -0.35, Math.PI/2);
+      }
+      add(new THREE.CylinderGeometry(0.06,0.06,0.03,12), A, 0,0.02,-0.53, Math.PI/2);
+      break;
+    default: // standard — 오리지널 디자인
+      add(new THREE.BoxGeometry(0.1,0.12,0.5), B);
+      add(new THREE.CylinderGeometry(0.025,0.025,0.35,8), B, 0,0.02,-0.4, Math.PI/2);
+      add(new THREE.BoxGeometry(0.11,0.02,0.15), A, 0,0.04,0.1);
+      break;
+  }
+}
 function applyEquippedCosmetics(){
   const shurikenItem = COSMETICS.shuriken.find(it => it.id === player.equipped.shuriken);
   if(shurikenItem && shurikenMat) shurikenMat.color.set(shurikenItem.color);
@@ -1484,12 +1690,168 @@ function applyEquippedCosmetics(){
   if(crosshairItem){
     document.documentElement.style.setProperty('--crosshair-color', crosshairItem.color);
   }
+  // 총기 모델 (모양) — 장착 모델이 바뀌었으면 뷰모델 재생성
+  if(gunGroup && player.equipped.gunModel !== currentGunModelId){
+    rebuildGunModel(player.equipped.gunModel);
+  }
 }
 function updateCoinHUD(){
   const el = document.getElementById('coinVal');
   if(el) el.textContent = player.coins;
   const shopEl = document.getElementById('shopCoinVal');
   if(shopEl) shopEl.textContent = player.coins;
+}
+// ============================================================
+// AVATAR — 장착한 패션으로 복셀풍 아바타 메시 생성 + 상점 미리보기
+// ============================================================
+function buildAvatarMesh(){
+  const g = new THREE.Group();
+  const eq = player.fashionEquipped;
+  const outfitItem = FASHION.outfit.find(o => o.id === eq.outfit) || FASHION.outfit[0];
+  const hairItem = FASHION.hairColor.find(o => o.id === eq.hairColor) || FASHION.hairColor[0];
+  const mSkin = new THREE.MeshStandardMaterial({color:0xf0c8a0, roughness:0.8});
+  const mOutfit = new THREE.MeshStandardMaterial({color:outfitItem.color, roughness:0.7});
+  const mHair = new THREE.MeshStandardMaterial({color:hairItem.color, roughness:0.6});
+  const mDark = new THREE.MeshStandardMaterial({color:0x222222});
+  function box(w,h,d,mat,x,y,z){
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+    m.position.set(x,y,z);
+    g.add(m);
+    return m;
+  }
+  // 다리 / 몸통 / 팔 / 손
+  box(0.16,0.4,0.16,mDark,-0.12,0.2,0);
+  box(0.16,0.4,0.16,mDark,0.12,0.2,0);
+  box(0.5,0.55,0.28,mOutfit,0,0.68,0);
+  box(0.13,0.45,0.13,mOutfit,-0.33,0.68,0);
+  box(0.13,0.45,0.13,mOutfit,0.33,0.68,0);
+  box(0.13,0.12,0.13,mSkin,-0.33,0.4,0);
+  box(0.13,0.12,0.13,mSkin,0.33,0.4,0);
+  // 머리
+  box(0.42,0.4,0.4,mSkin,0,1.18,0);
+  // 얼굴 표정
+  const eyeY = 1.24, eyeZ = 0.205;
+  if(eq.face === 'happy'){
+    [-0.1,0.1].forEach(x=>{
+      const e1 = box(0.07,0.02,0.02,mDark,x-0.02,eyeY,eyeZ); e1.rotation.z = 0.5;
+      const e2 = box(0.07,0.02,0.02,mDark,x+0.02,eyeY,eyeZ); e2.rotation.z = -0.5;
+    });
+  } else if(eq.face === 'wink'){
+    box(0.06,0.06,0.02,mDark,-0.1,eyeY,eyeZ);
+    box(0.08,0.02,0.02,mDark,0.1,eyeY,eyeZ);
+  } else if(eq.face === 'angry'){
+    [-0.1,0.1].forEach((x,i)=>{
+      box(0.06,0.06,0.02,mDark,x,eyeY,eyeZ);
+      const b = box(0.09,0.02,0.02,mDark,x,eyeY+0.08,eyeZ);
+      b.rotation.z = i === 0 ? -0.4 : 0.4;
+    });
+  } else if(eq.face === 'sleepy'){
+    [-0.1,0.1].forEach(x=>box(0.08,0.02,0.02,mDark,x,eyeY,eyeZ));
+  } else { // normal
+    [-0.1,0.1].forEach(x=>box(0.05,0.07,0.02,mDark,x,eyeY,eyeZ));
+  }
+  box(0.08,0.02,0.02,mDark,0,1.08,eyeZ); // 입
+  // 헤어 스타일
+  if(eq.hair === 'short'){
+    box(0.44,0.12,0.42,mHair,0,1.4,0);
+    box(0.44,0.14,0.1,mHair,0,1.32,-0.17);
+  } else if(eq.hair === 'spiky'){
+    box(0.44,0.1,0.42,mHair,0,1.4,0);
+    for(let i=0;i<4;i++){
+      const s = new THREE.Mesh(new THREE.ConeGeometry(0.06,0.16,4), mHair);
+      s.position.set(-0.15+i*0.1, 1.5, 0);
+      g.add(s);
+    }
+  } else if(eq.hair === 'bob'){
+    box(0.46,0.16,0.44,mHair,0,1.4,0);
+    box(0.05,0.35,0.44,mHair,-0.235,1.2,0);
+    box(0.05,0.35,0.44,mHair,0.235,1.2,0);
+    box(0.46,0.35,0.05,mHair,0,1.2,-0.215);
+  } else if(eq.hair === 'ponytail'){
+    box(0.44,0.12,0.42,mHair,0,1.4,0);
+    const t = box(0.1,0.4,0.1,mHair,0,1.25,-0.28);
+    t.rotation.x = 0.35;
+  } else if(eq.hair === 'mohawk'){
+    for(let i=0;i<5;i++) box(0.08,0.16,0.08,mHair,0,1.44,-0.16+i*0.08);
+  }
+  // 악세서리
+  if(eq.acc === 'halo'){
+    const h = new THREE.Mesh(new THREE.TorusGeometry(0.18,0.025,8,20), new THREE.MeshStandardMaterial({color:0xe8a33d, emissive:0xe8a33d, emissiveIntensity:0.6}));
+    h.rotation.x = Math.PI/2;
+    h.position.y = 1.64;
+    g.add(h);
+  } else if(eq.acc === 'horns'){
+    [-0.15,0.15].forEach(x=>{
+      const c = new THREE.Mesh(new THREE.ConeGeometry(0.05,0.15,6), new THREE.MeshStandardMaterial({color:0xc73e3e}));
+      c.position.set(x, 1.52, 0.05);
+      g.add(c);
+    });
+  } else if(eq.acc === 'glasses'){
+    [-0.1,0.1].forEach(x=>box(0.11,0.09,0.02,mDark,x,1.24,0.215));
+    box(0.05,0.02,0.02,mDark,0,1.24,0.215);
+  } else if(eq.acc === 'headband'){
+    box(0.44,0.06,0.42,new THREE.MeshStandardMaterial({color:0x008b9a, emissive:0x008b9a, emissiveIntensity:0.3}),0,1.34,0);
+  } else if(eq.acc === 'scarf'){
+    const mScarf = new THREE.MeshStandardMaterial({color:0xc73e3e});
+    box(0.46,0.1,0.3,mScarf,0,0.95,0.05);
+    box(0.1,0.25,0.05,mScarf,0.12,0.8,0.16);
+  }
+  return g;
+}
+let avatarScene = null, avatarCam = null, avatarRenderer = null, avatarGroup = null, avatarLoopRunning = false;
+function ensureAvatarPreview(){
+  const cv = document.getElementById('avatarPreview');
+  if(!cv || typeof THREE === 'undefined') return;
+  try {
+    if(!avatarRenderer){
+      avatarRenderer = new THREE.WebGLRenderer({canvas:cv, antialias:true, alpha:true});
+      avatarRenderer.setSize(cv.width, cv.height, false);
+      avatarScene = new THREE.Scene();
+      avatarCam = new THREE.PerspectiveCamera(40, cv.width/cv.height, 0.1, 20);
+      avatarCam.position.set(0, 1.15, 3.1);
+      avatarCam.lookAt(0, 0.85, 0);
+      avatarScene.add(new THREE.HemisphereLight(0xffffff, 0x445544, 1.0));
+      const dl = new THREE.DirectionalLight(0xffffff, 0.8);
+      dl.position.set(2,3,2);
+      avatarScene.add(dl);
+    }
+    rebuildAvatarPreview();
+  } catch(e){ /* WebGL 컨텍스트 부족 등 — 미리보기 없이도 상점은 동작 */ }
+}
+function rebuildAvatarPreview(){
+  if(!avatarScene) return;
+  if(avatarGroup){
+    avatarScene.remove(avatarGroup);
+    avatarGroup.traverse(m=>{ if(m.geometry) m.geometry.dispose(); if(m.material) m.material.dispose(); });
+  }
+  avatarGroup = buildAvatarMesh();
+  avatarScene.add(avatarGroup);
+}
+function startAvatarPreviewLoop(){
+  if(avatarLoopRunning) return;
+  avatarLoopRunning = true;
+  (function loop(){
+    if(!shopOpen || !avatarRenderer){ avatarLoopRunning = false; return; }
+    if(avatarGroup) avatarGroup.rotation.y += 0.02;
+    avatarRenderer.render(avatarScene, avatarCam);
+    requestAnimationFrame(loop);
+  })();
+}
+function buyFashion(cat, id){
+  const item = FASHION[cat].find(i => i.id === id);
+  if(!item || player.fashionOwned[cat].includes(id) || player.coins < item.cost) return;
+  player.coins -= item.cost;
+  player.fashionOwned[cat].push(id);
+  updateCoinHUD();
+  AudioSys.play('pickup');
+  equipFashion(cat, id);
+}
+function equipFashion(cat, id){
+  if(!player.fashionOwned[cat].includes(id)) return;
+  player.fashionEquipped[cat] = id;
+  rebuildAvatarPreview();
+  renderShop();
+  saveProgress();
 }
 let shopOpen = false;
 function openShop(){
@@ -1498,6 +1860,8 @@ function openShop(){
   if(document.pointerLockElement) document.exitPointerLock();
   renderShop();
   document.getElementById('shopOverlay').classList.add('open');
+  ensureAvatarPreview();
+  startAvatarPreviewLoop();
 }
 function closeShop(){
   shopOpen = false;
@@ -1526,11 +1890,107 @@ function equipItem(category, id){
   renderShop();
   saveProgress();
 }
+function buyUpgrade(id){
+  const u = UPGRADES.find(x => x.id === id);
+  if(!u || hasUpgrade(id) || player.coins < u.cost) return;
+  player.coins -= u.cost;
+  player.upgrades[id] = true;
+  updateCoinHUD();
+  updateWeaponHUD(); // 확장 탄창 등이 즉시 HUD에 반영되도록
+  renderShop();
+  saveProgress();
+  AudioSys.play('pickup');
+}
 function renderShop(){
   const root = document.getElementById('shopItems');
   if(!root) return;
   root.innerHTML = '';
-  const categoryLabels = { shuriken:'표창 스킨', gun:'총기 스킨', crosshair:'조준점 색상' };
+  // --- 무기 업그레이드 (영구, 1회 구매) ---
+  const upSection = document.createElement('div');
+  upSection.className = 'shopSection';
+  const upHeading = document.createElement('div');
+  upHeading.className = 'shopSectionTitle';
+  upHeading.textContent = '무기 업그레이드 (영구)';
+  upSection.appendChild(upHeading);
+  const upGrid = document.createElement('div');
+  upGrid.className = 'shopGrid';
+  UPGRADES.forEach(u=>{
+    const owned = hasUpgrade(u.id);
+    const card = document.createElement('div');
+    card.className = 'shopCard' + (owned ? ' equipped' : '');
+    const swatch = document.createElement('div');
+    swatch.className = 'shopSwatch';
+    swatch.style.cssText = 'display:flex;align-items:center;justify-content:center;font-size:16px;background:rgba(232,163,61,0.15);color:#e8a33d;';
+    swatch.textContent = u.icon;
+    card.appendChild(swatch);
+    const name = document.createElement('div');
+    name.className = 'shopName';
+    name.innerHTML = u.name + '<br><span style="color:rgba(240,247,243,0.5);font-size:8.5px;">' + u.desc + '</span>';
+    card.appendChild(name);
+    const btn = document.createElement('button');
+    btn.className = 'shopBtnAction';
+    if(owned){
+      btn.textContent = 'OWNED';
+      btn.disabled = true;
+    } else {
+      btn.textContent = u.cost + ' COIN';
+      btn.disabled = player.coins < u.cost;
+      btn.onclick = () => buyUpgrade(u.id);
+    }
+    card.appendChild(btn);
+    upGrid.appendChild(card);
+  });
+  upSection.appendChild(upGrid);
+  root.appendChild(upSection);
+  // --- 패션 샵 (아바타 꾸미기) ---
+  Object.keys(FASHION).forEach(cat=>{
+    const section = document.createElement('div');
+    section.className = 'shopSection';
+    const heading = document.createElement('div');
+    heading.className = 'shopSectionTitle';
+    heading.textContent = '패션 샵 — ' + (FASHION_LABELS[cat] || cat);
+    section.appendChild(heading);
+    const grid = document.createElement('div');
+    grid.className = 'shopGrid';
+    FASHION[cat].forEach(item=>{
+      const owned = player.fashionOwned[cat].includes(item.id);
+      const equipped = player.fashionEquipped[cat] === item.id;
+      const card = document.createElement('div');
+      card.className = 'shopCard' + (equipped ? ' equipped' : '');
+      const swatch = document.createElement('div');
+      swatch.className = 'shopSwatch';
+      if(item.color !== undefined){
+        swatch.style.background = '#'+item.color.toString(16).padStart(6,'0');
+      } else {
+        swatch.style.cssText = 'display:flex;align-items:center;justify-content:center;font-size:12px;background:rgba(114,37,107,0.28);color:#f0f7f3;';
+        swatch.textContent = item.glyph || '★';
+      }
+      card.appendChild(swatch);
+      const name = document.createElement('div');
+      name.className = 'shopName';
+      name.textContent = item.name;
+      card.appendChild(name);
+      const btn = document.createElement('button');
+      btn.className = 'shopBtnAction';
+      if(equipped){
+        btn.textContent = 'EQUIPPED';
+        btn.disabled = true;
+      } else if(owned){
+        btn.textContent = 'EQUIP';
+        btn.onclick = () => equipFashion(cat, item.id);
+      } else {
+        btn.textContent = item.cost + ' COIN';
+        btn.disabled = player.coins < item.cost;
+        btn.onclick = () => buyFashion(cat, item.id);
+      }
+      card.appendChild(btn);
+      grid.appendChild(card);
+    });
+    section.appendChild(grid);
+    root.appendChild(section);
+  });
+  // --- 외형 카테고리 (스킨/모델) ---
+  const categoryLabels = { shuriken:'표창 스킨', gun:'총기 색상', gunModel:'총기 모델 (모양)', crosshair:'조준점 색상' };
   Object.keys(COSMETICS).forEach(category=>{
     const section = document.createElement('div');
     section.className = 'shopSection';
@@ -1547,8 +2007,14 @@ function renderShop(){
       card.className = 'shopCard' + (equipped ? ' equipped' : '');
       const swatch = document.createElement('div');
       swatch.className = 'shopSwatch';
-      const swatchColor = category === 'gun' ? item.accent : (category === 'crosshair' ? item.color : item.color);
-      swatch.style.background = typeof swatchColor === 'string' ? swatchColor : '#'+swatchColor.toString(16).padStart(6,'0');
+      if(category === 'gunModel'){
+        // 모델은 색상 대신 글리프로 형태를 표현
+        swatch.style.cssText = 'display:flex;align-items:center;justify-content:center;font-size:15px;background:rgba(0,139,154,0.18);color:#f0f7f3;';
+        swatch.textContent = item.glyph || '▬';
+      } else {
+        const swatchColor = category === 'gun' ? item.accent : item.color;
+        swatch.style.background = typeof swatchColor === 'string' ? swatchColor : '#'+swatchColor.toString(16).padStart(6,'0');
+      }
       card.appendChild(swatch);
       const name = document.createElement('div');
       name.className = 'shopName';
@@ -1639,6 +2105,8 @@ function mergeVoxelGeometry(voxels, size){
 }
 function makeDummy(isBoss, isMidTier, variant){
   variant = variant || 'normal'; // 'normal' | 'flyer'(비행형) | 'chaser'(추격형)
+  const isMega = isBoss && isMegaBossStage(player.level); // 10층 단위 메가 보스
+  const bossScale = isMega ? CFG.bossSizeMult*1.25 : CFG.bossSizeMult;
   const group = new THREE.Group();
   // --- voxel body: 세분화된 픽셀 블롭 (버텍스 컬러로 도트 명암 표현) ---
   let baseColor = 0xc73e3e;
@@ -1697,14 +2165,20 @@ function makeDummy(isBoss, isMidTier, variant){
     group.scale.setScalar(0.92);
   }
   if(isBoss){
-    group.scale.setScalar(CFG.bossSizeMult);
-    // extra crown spikes so a boss reads differently from a glance, even at the same base shape
+    group.scale.setScalar(bossScale);
+    // extra crown spikes so a boss reads differently from a glance (메가 보스는 8개)
     const spikeMat = new THREE.MeshStandardMaterial({color:0xe8a33d, emissive:0xe8a33d, emissiveIntensity:0.3});
-    for(let i=0;i<4;i++){
+    const spikeCount = isMega ? 8 : 4;
+    for(let i=0;i<spikeCount;i++){
       const spike = new THREE.Mesh(new THREE.ConeGeometry(VU*0.4, VU*1.3, 4), spikeMat);
-      const ang = (i/4)*Math.PI*2;
+      const ang = (i/spikeCount)*Math.PI*2;
       spike.position.set(Math.cos(ang)*1.3*VU, 8.4*VU, Math.sin(ang)*1.3*VU);
       group.add(spike);
+    }
+    if(isMega){
+      // 메가 보스: 금빛 발광으로 위압감 표현
+      bodyMat.emissive = new THREE.Color(0xe8a33d);
+      bodyMat.emissiveIntensity = 0.18;
     }
   }
   if(isMidTier){
@@ -1712,13 +2186,14 @@ function makeDummy(isBoss, isMidTier, variant){
     bodyMat.emissiveIntensity = 0.25; // makes the rainbow hue cycling read clearly under the arena lighting
   }
   const baseHealth = getDummyHealthForLevel();
-  const health = isBoss ? baseHealth * CFG.bossHealthMult : baseHealth;
-  const hitRadius = 0.55 * (isBoss ? CFG.bossSizeMult : 1) * (variant === 'flyer' ? 0.85 : 1);
+  const bossHealthMult = isMega ? CFG.megaBossHealthMult : CFG.bossHealthMult;
+  const health = isBoss ? baseHealth * bossHealthMult : baseHealth;
+  const hitRadius = 0.55 * (isBoss ? bossScale : 1) * (variant === 'flyer' ? 0.85 : 1);
   let moveSpeed = (CFG.dummyMoveSpeedMin + Math.random()*(CFG.dummyMoveSpeedMax-CFG.dummyMoveSpeedMin)) * (isBoss ? 0.7 : 1);
   if(variant === 'chaser') moveSpeed = CFG.chaserSpeed;
   else if(variant === 'flyer') moveSpeed *= 1.4;
   group.userData = {
-    alive:true, health, maxHealth:health, hitRadius, isBoss: !!isBoss, isMidTier: !!isMidTier,
+    alive:true, health, maxHealth:health, hitRadius, isBoss: !!isBoss, isMega: !!isMega, isMidTier: !!isMidTier,
     variant,
     baseY: 0,                      // flyer의 호버 고도 (initDummyAtSpot에서 설정)
     bobPhase: Math.random()*Math.PI*2,
@@ -1771,7 +2246,7 @@ function pickPatrolPoint(center){
 }
 // 몬스터의 기본 스케일 (보스 배율 / 변종별 축소) — 리스폰·사망 연출 후 복원에 사용
 function getDummyBaseScale(d){
-  if(d.userData.isBoss) return CFG.bossSizeMult;
+  if(d.userData.isBoss) return d.userData.isMega ? CFG.bossSizeMult*1.25 : CFG.bossSizeMult;
   if(d.userData.variant === 'flyer') return 0.8;
   if(d.userData.variant === 'chaser') return 0.92;
   return 1;
@@ -1807,6 +2282,132 @@ function getStageRespawnQuota(stage, count){
 }
 function isBossStage(stage){
   return stage % CFG.stageBossInterval === 0;
+}
+function isMegaBossStage(stage){
+  return stage % 10 === 0; // 10층 단위: 메가 보스 (체력 10배, 공격 패턴 다양)
+}
+// ============================================================
+// RUN SAVE / LOAD — 진행 중인 런(층·점수 등)을 저장하고 이어하기
+// ============================================================
+const RUN_KEY = 'velocity_proto_run_v1';
+function saveRunState(showMsg){
+  if(!gameRunning) return;
+  try {
+    localStorage.setItem(runKeyFor(profileIndex), JSON.stringify({
+      level: player.level,
+      score: player.score,
+      kills: player.kills,
+      bestCombo: player.bestCombo,
+      topSpeed: player.topSpeed,
+      specialWeapon: player.specialWeapon,
+    }));
+    if(showMsg) addFeedMsg('저장 완료 — ' + player.level + '층');
+  } catch(e){}
+}
+function getRunSave(){
+  try {
+    const raw = localStorage.getItem(runKeyFor(profileIndex)) || (profileIndex === 0 ? localStorage.getItem(RUN_KEY) : null);
+    return raw ? JSON.parse(raw) : null;
+  } catch(e){ return null; }
+}
+// ---- 프로필 전환 + 시작화면 프로필/캐릭터 UI ----
+function resetPersistentState(){
+  player.coins = 0;
+  player.owned = { shuriken:['silver'], gun:['standard'], gunModel:['standard'], crosshair:['teal'] };
+  player.equipped = { shuriken:'silver', gun:'standard', gunModel:'standard', crosshair:'teal' };
+  player.upgrades = {};
+  player.character = 'seojun';
+  player.fashionOwned = { hair:['short'], hairColor:['gold'], face:['normal'], outfit:['teal'], acc:['none'] };
+  player.fashionEquipped = { hair:'short', hairColor:'gold', face:'normal', outfit:'teal', acc:'none' };
+  loadedSave = null;
+}
+function selectProfile(i){
+  if(i === profileIndex && loadedSave !== null){ renderProfileUI(); return; }
+  profileIndex = i;
+  try { localStorage.setItem(PROFILE_IDX_KEY, String(i)); } catch(e){}
+  resetPersistentState();
+  loadProgress();
+  applyEquippedCosmetics();
+  updateCoinHUD();
+  updateWeaponHUD();
+  updateContinueBtn();
+  renderProfileUI();
+  if(avatarScene) rebuildAvatarPreview();
+}
+function peekProfile(i){
+  try {
+    const s = JSON.parse(localStorage.getItem(saveKeyFor(i)) || 'null');
+    const r = JSON.parse(localStorage.getItem(runKeyFor(i)) || 'null');
+    return { exists: !!s, coins: s ? (s.coins || 0) : 0, level: r ? r.level : null, character: s ? s.character : null };
+  } catch(e){ return { exists:false, coins:0, level:null, character:null }; }
+}
+function renderProfileUI(){
+  const row = document.getElementById('profileRow');
+  const cs = document.getElementById('charSelect');
+  if(!row || !cs) return;
+  row.innerHTML = '';
+  for(let i=0;i<3;i++){
+    const info = peekProfile(i);
+    const active = i === profileIndex;
+    const b = document.createElement('button');
+    b.style.cssText = 'font-family:inherit;padding:8px 14px;border-radius:3px;cursor:pointer;font-size:11px;letter-spacing:1px;font-weight:700;background:'
+      + (active ? 'rgba(0,139,154,0.35)' : 'transparent') + ';color:#f0f7f3;border:1px solid '
+      + (active ? 'var(--teal)' : 'rgba(240,247,243,0.25)') + ';';
+    const chInfo = info.character ? CHARACTERS.find(c=>c.id===info.character) : null;
+    const sub = !info.exists ? '새 프로필'
+      : (chInfo ? chInfo.name + ' · ' : '') + (info.level ? info.level + '층 · ' : '') + info.coins + ' COIN';
+    b.innerHTML = '프로필 ' + (i+1) + '<br><span style="font-size:9px;opacity:0.7;font-weight:400;">' + sub + '</span>';
+    b.onclick = () => selectProfile(i);
+    row.appendChild(b);
+  }
+  cs.innerHTML = '';
+  CHARACTERS.forEach(ch=>{
+    const sel = player.character === ch.id;
+    const card = document.createElement('div');
+    card.style.cssText = 'width:132px;padding:10px 8px;border-radius:6px;cursor:pointer;text-align:center;background:'
+      + (sel ? 'rgba(0,139,154,0.18)' : 'rgba(240,247,243,0.04)') + ';border:1px solid '
+      + (sel ? 'var(--teal)' : 'rgba(240,247,243,0.15)') + ';';
+    function statBar(label, v, max){
+      const pct = Math.round(v/max*100);
+      return '<div style="display:flex;align-items:center;gap:4px;margin-top:3px;"><span style="font-size:8px;color:rgba(240,247,243,0.6);width:26px;text-align:left;">' + label + '</span><div style="flex:1;height:5px;background:rgba(255,255,255,0.1);border-radius:2px;"><div style="width:' + pct + '%;height:100%;background:var(--amber);border-radius:2px;"></div></div></div>';
+    }
+    card.innerHTML = '<div style="font-size:13px;color:#f0f7f3;font-weight:700;">' + ch.name
+      + ' <span style="font-size:9px;color:var(--amber);">' + ch.gender + '</span>'
+      + (sel ? ' <span style="font-size:9px;color:var(--teal);">✔</span>' : '') + '</div>'
+      + '<div style="font-size:8.5px;letter-spacing:1px;color:var(--teal);margin:2px 0 4px;">' + ch.title + '</div>'
+      + '<div style="font-size:8.5px;color:rgba(240,247,243,0.6);margin-bottom:5px;min-height:22px;">' + ch.desc + '</div>'
+      + statBar('HP', ch.hp, 1.5) + statBar('파워', ch.power, 1.35) + statBar('속도', ch.speed, 1.1);
+    card.onclick = () => selectCharacter(ch.id);
+    cs.appendChild(card);
+  });
+}
+function selectCharacter(id){
+  if(!CHARACTERS.find(c => c.id === id)) return;
+  player.character = id;
+  saveProgress();
+  renderProfileUI();
+  if(avatarScene) rebuildAvatarPreview();
+}
+function addFeedMsg(text){
+  const kf = document.getElementById('killfeed');
+  if(!kf) return;
+  const msg = document.createElement('div');
+  msg.className = 'killmsg';
+  msg.style.borderLeftColor = '#39c98f';
+  msg.textContent = text;
+  kf.appendChild(msg);
+  setTimeout(()=>msg.remove(), 3000);
+}
+function updateContinueBtn(){
+  const btn = document.getElementById('continueBtn');
+  if(!btn) return;
+  const run = getRunSave();
+  if(run && run.level > 1){
+    btn.style.display = 'inline-block';
+    btn.textContent = '이어하기 (' + run.level + '층)';
+  } else {
+    btn.style.display = 'none';
+  }
 }
 let stagePendingRespawns = 0;
 let stageKillsDone = 0;
@@ -1870,9 +2471,10 @@ function handleDummyDeathForStage(d){
     dropMidTierLoot(deathPos);
   }
   if(d.userData.isBoss){
-    // 보스는 특수무기 + 여러 아이템을 한꺼번에 원형으로 흩뿌림
+    // 보스는 특수무기 + 여러 아이템을 한꺼번에 원형으로 흩뿌림 (메가 보스는 2배)
     dropWeaponItemAt(deathPos);
     dropBossLootBurst(deathPos);
+    if(d.userData.isMega) dropBossLootBurst({x: deathPos.x + 1.2, z: deathPos.z + 1.2});
   }
   if(d.userData.canRespawnOnce && !d.userData.hasUsedRespawn){
     d.userData.canRespawnOnce = false;
@@ -1908,7 +2510,7 @@ function updateStageClear(dt){
   if(stageClearTimer <= 0) return;
   stageClearTimer -= dt;
   const el = document.getElementById('stageClearMsg');
-  if(el) el.textContent = 'STAGE CLEAR — 아이템을 회수하세요 (' + Math.max(0, Math.ceil(stageClearTimer)) + 's)';
+  if(el) el.textContent = player.level + '층 클리어 — 아이템을 회수하세요 (' + Math.max(0, Math.ceil(stageClearTimer)) + 's)';
   if(stageClearTimer <= 0){
     stageClearTimer = 0;
     showStageClearMsg(false);
@@ -1926,6 +2528,7 @@ function advanceStage(){
   setupStage(player.level);
   grantStageStartInvincibility();
   saveProgress();
+  saveRunState(false); // 층 오를 때마다 자동 저장 → 이어하기 가능
 }
 // ============================================================
 // STAGE-START INVINCIBILITY (shield)
@@ -2082,12 +2685,12 @@ function applyLootPickupEffect(type){
     updateCoinHUD();
     createImpactEffect(yawObject.position.clone(), 0xe8a33d, 'gun');
   } else if(type === 'shuriken'){
-    player.shurikenCount = CFG.shurikenMax;
+    player.shurikenCount = effShurikenMax();
     player.shurikenRegenTimer = 0;
     updateWeaponHUD();
     createImpactEffect(yawObject.position.clone(), 0xf0f7f3, 'shuriken');
   } else if(type === 'ammo'){
-    player.ammo = CFG.gunMagSize;
+    player.ammo = effMagSize();
     player.reloading = false;
     updateWeaponHUD();
     createImpactEffect(yawObject.position.clone(), 0x66ccff, 'gun');
@@ -2175,20 +2778,47 @@ function endTelegraph(d){
   mat.emissive.set(0x000000);
   mat.emissiveIntensity = 0;
 }
-function fireDummyBullet(origin, dir){
-  const geo = new THREE.SphereGeometry(0.1, 8, 8);
-  const mat = new THREE.MeshBasicMaterial({color:0xff5544});
+function fireDummyBullet(origin, dir, opts){
+  opts = opts || {};
+  const geo = new THREE.SphereGeometry(opts.homing ? 0.16 : 0.1, 8, 8);
+  const mat = new THREE.MeshBasicMaterial({color: opts.homing ? 0xd8b6ff : 0xff5544});
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.copy(origin);
   scene.add(mesh);
   bullets.push({
     mesh,
-    vel: dir.clone().multiplyScalar(CFG.dummyBulletSpeed),
+    vel: dir.clone().multiplyScalar(opts.homing ? 15 : CFG.dummyBulletSpeed),
     parried: false,
     dead: false,
     fromPlayer: false,
-    life: CFG.dummyBulletLifetime,
+    homing: !!opts.homing, // 유도탄: 플레이어를 추적 (패링하면 유도 해제)
+    life: opts.homing ? 6.5 : CFG.dummyBulletLifetime,
   });
+}
+// 보스 공격 패턴 — 일반 보스(5층 단위): 단발/부채꼴, 메가 보스(10층 단위): 부채꼴/전방위 탄막/유도탄
+function fireBossPattern(d, headPos, dir){
+  const ud = d.userData;
+  const patterns = ud.isMega ? ['spread','radial','homing'] : ['single','spread'];
+  const pattern = patterns[Math.floor(Math.random()*patterns.length)];
+  if(pattern === 'single'){
+    fireDummyBullet(headPos, dir);
+  } else if(pattern === 'spread'){
+    // 부채꼴 5연발 (수평 ±0.36 라디안)
+    for(let i=-2;i<=2;i++){
+      const a = i*0.18;
+      const cos = Math.cos(a), sin = Math.sin(a);
+      const nd = new THREE.Vector3(dir.x*cos - dir.z*sin, dir.y, dir.x*sin + dir.z*cos).normalize();
+      fireDummyBullet(headPos, nd);
+    }
+  } else if(pattern === 'radial'){
+    // 전방위 12발 탄막
+    for(let i=0;i<12;i++){
+      const a = (i/12)*Math.PI*2;
+      fireDummyBullet(headPos, new THREE.Vector3(Math.cos(a), -0.05, Math.sin(a)).normalize());
+    }
+  } else if(pattern === 'homing'){
+    fireDummyBullet(headPos, dir, {homing:true});
+  }
 }
 function updateDummyAI(d, dt){
   const ud = d.userData;
@@ -2252,10 +2882,12 @@ function updateDummyAI(d, dt){
       const distNow = headPos.distanceTo(playerPos);
       const blockDist = getObstacleBlockDist(headPos, dirNow);
       if(distNow < CFG.dummyAttackRange && blockDist > distNow){
-        fireDummyBullet(headPos, dirNow);
+        if(ud.isBoss) fireBossPattern(d, headPos, dirNow);
+        else fireDummyBullet(headPos, dirNow);
       }
       endTelegraph(d);
       ud.attackCd = CFG.dummyAttackCooldownMin + Math.random()*(CFG.dummyAttackCooldownMax-CFG.dummyAttackCooldownMin);
+      if(ud.isMega) ud.attackCd *= 0.55; // 메가 보스는 더 자주 공격
     }
     return;
   }
@@ -2281,6 +2913,11 @@ function updateBullets(dt){
     const b = bullets[i];
     if(b.dead){ bullets.splice(i,1); continue; }
     b.life -= dt;
+    if(b.homing && !b.fromPlayer && !player.dead){
+      // 유도탄: 플레이어 방향으로 서서히 선회
+      const desired = yawObject.position.clone().sub(b.mesh.position).normalize().multiplyScalar(15);
+      b.vel.lerp(desired, Math.min(1, dt*2.2));
+    }
     b.mesh.position.addScaledVector(b.vel, dt);
     let remove = false;
     if(b.life <= 0) remove = true;
@@ -2404,7 +3041,7 @@ function spawnShurikenProjectile(origin, targetPoint, targetDummy){
       scene.remove(group);
       group.traverse(m=>{ if(m.geometry) m.geometry.dispose(); if(m.material) m.material.dispose(); });
       if(targetDummy && targetDummy.userData.alive){
-        damageDummy(targetDummy, CFG.shurikenDamage, targetPoint.clone(), 'shuriken');
+        damageDummy(targetDummy, effShurikenDamage(), targetPoint.clone(), 'shuriken');
       } else if(!targetDummy){
         createImpactEffect(targetPoint.clone(), 0xf0f7f3, 'shuriken');
       }
@@ -2420,7 +3057,7 @@ function spawnShurikenProjectile(origin, targetPoint, targetDummy){
 function tryFireGun(){
   if(player.reloading || player.fireCd > 0) return;
   if(player.ammo <= 0){ showEmptyClick(); return; }
-  player.fireCd = CFG.gunFireRate;
+  player.fireCd = effFireRate();
   player.ammo--;
   updateWeaponHUD();
   showMuzzleFlash();
@@ -2441,7 +3078,7 @@ function showEmptyClick(){
   });
 }
 function startReload(){
-  if(player.reloading || player.ammo === CFG.gunMagSize) return;
+  if(player.reloading || player.ammo === effMagSize()) return;
   player.reloading = true;
   player.reloadTimer = CFG.gunReloadTime;
   AudioSys.play('reload');
@@ -2469,14 +3106,26 @@ function doGunHitscan(){
   });
   if(closestDummy){
     const hitPos = origin.clone().add(dir.clone().multiplyScalar(closestDist));
-    damageDummy(closestDummy, CFG.gunDamage, hitPos, 'gun');
+    damageDummy(closestDummy, effGunDamage(), hitPos, 'gun');
+    if(hasUpgrade('explosive')) explodeRound(hitPos, closestDummy);
   } else {
     breakCombo();
     if(wallDist < CFG.gunRange){
       const sparkPos = origin.clone().add(dir.clone().multiplyScalar(wallDist));
       createImpactEffect(sparkPos, 0xe8a33d, 'gun');
+      if(hasUpgrade('explosive')) explodeRound(sparkPos, null);
     }
   }
+}
+// 폭발탄 업그레이드: 명중 지점 주변에 범위 피해 (직격 대상 제외)
+function explodeRound(pos, excludeDummy){
+  const radius = 3.2, dmg = Math.max(1, Math.round(effGunDamage()*0.5));
+  dummies.forEach(d=>{
+    if(!d.userData.alive || d === excludeDummy) return;
+    const dPos = d.position.clone(); dPos.y += 0.9;
+    if(dPos.distanceTo(pos) < radius) damageDummy(d, dmg, dPos.clone(), 'gun');
+  });
+  createImpactEffect(pos, 0xff7733, 'gun');
 }
 function raySphereDist(origin, dir, center, radius){
   const oc = origin.clone().sub(center);
@@ -2767,6 +3416,10 @@ function damageDummy(d, amount, hitPos, weaponType){
     const coinReward = d.userData.isBoss ? CFG.coinsPerKill*5 : CFG.coinsPerKill;
     player.coins += coinReward;
     updateCoinHUD();
+    if(hasUpgrade('vampire')){ // 흡혈: 처치 시 체력 회복
+      player.health = Math.min(CFG.maxHealth, player.health + 5);
+      updateHealthHUD();
+    }
     killDummyFx(d);
     addKillfeed(d.userData.isBoss);
     handleDummyDeathForStage(d);
@@ -2850,7 +3503,7 @@ function registerHitScore(isKill){
 }
 function showLevelUpBanner(){
   const el = document.getElementById('levelUpBanner');
-  el.textContent = 'STAGE ' + player.level;
+  el.textContent = player.level + '층';
   el.classList.remove('show'); void el.offsetWidth;
   el.classList.add('show');
 }
@@ -2903,17 +3556,17 @@ function updateWeaponHUD(){
   const nameElM = document.getElementById('weaponNameM');
   const ammoElM = document.getElementById('weaponAmmoM');
   if(player.weapon === 'gun'){
-    const ammoText = player.reloading ? 'RELOADING...' : (player.ammo + ' / ' + CFG.gunMagSize);
+    const ammoText = player.reloading ? 'RELOADING...' : (player.ammo + ' / ' + effMagSize());
     ammoEl.textContent = ammoText;
     if(nameElM){ nameElM.textContent = 'GUN'; ammoElM.textContent = ammoText; }
   } else {
-    const shurikenText = player.shurikenCount + ' / ' + CFG.shurikenMax;
+    const shurikenText = player.shurikenCount + ' / ' + effShurikenMax();
     ammoEl.textContent = shurikenText;
     if(nameElM){ nameElM.textContent = 'SHURIKEN'; ammoElM.textContent = shurikenText; }
   }
   const reloadBtnM = document.getElementById('reloadBtnM');
   if(reloadBtnM){
-    reloadBtnM.classList.toggle('oncooldown', player.weapon !== 'gun' || player.reloading || player.ammo === CFG.gunMagSize);
+    reloadBtnM.classList.toggle('oncooldown', player.weapon !== 'gun' || player.reloading || player.ammo === effMagSize());
   }
 }
 function updateSpeedHUD(){
@@ -3125,7 +3778,7 @@ function animate(){
     if(player.specialCd > 0) player.specialCd -= dt;
     updateInvincibility(dt);
     // shuriken regeneration: refill 1 charge every CFG.shurikenRegenTime seconds up to max
-    if(player.shurikenCount < CFG.shurikenMax){
+    if(player.shurikenCount < effShurikenMax()){
       player.shurikenRegenTimer += dt;
       if(player.shurikenRegenTimer >= CFG.shurikenRegenTime){
         player.shurikenRegenTimer = 0;
@@ -3139,7 +3792,7 @@ function animate(){
       player.reloadTimer -= dt;
       if(player.reloadTimer <= 0){
         player.reloading = false;
-        player.ammo = CFG.gunMagSize;
+        player.ammo = effMagSize();
       }
       updateWeaponHUD();
     }
@@ -3171,16 +3824,16 @@ function animate(){
 // ============================================================
 // GAME FLOW
 // ============================================================
-function startGame(){
+function startGame(resumeSave){
   if(!scene || !yawObject || !shurikenGroup){
     showFatalError('3D 라이브러리를 불러오지 못해 게임을 시작할 수 없습니다. 페이지를 새로고침 해주세요.');
     return;
   }
   player.score=0; player.level=1; player.kills=0; player.combo=0; player.bestCombo=0; player.topSpeed=0;
   player.health = CFG.maxHealth; player.dead = false;
-  player.ammo = CFG.gunMagSize; player.reloading = false;
+  player.ammo = effMagSize(); player.reloading = false;
   player.weapon = 'shuriken';
-  player.shurikenCd = 0; player.shurikenCount = CFG.shurikenMax; player.shurikenRegenTimer = 0;
+  player.shurikenCd = 0; player.shurikenCount = effShurikenMax(); player.shurikenRegenTimer = 0;
   player.dashCd=0; player.dashActive=false;
   player.isSliding=false; player.slideCd=0;
   player.isWallrunning=false;
@@ -3192,6 +3845,17 @@ function startGame(){
   player.airJumps=0; player.pounding=false;
   stageClearTimer = 0;
   showStageClearMsg(false);
+  // 이어하기: 저장된 런이 있으면 해당 층부터 재개 (층 시작 상태, 체력/탄약 가득)
+  if(resumeSave && typeof resumeSave.level === 'number' && resumeSave.level > 1){
+    player.level = resumeSave.level;
+    player.score = resumeSave.score || 0;
+    player.kills = resumeSave.kills || 0;
+    player.bestCombo = resumeSave.bestCombo || 0;
+    player.topSpeed = resumeSave.topSpeed || 0;
+    if(resumeSave.specialWeapon && SPECIAL_WEAPONS[resumeSave.specialWeapon.id]){
+      player.specialWeapon = { id: resumeSave.specialWeapon.id, charges: resumeSave.specialWeapon.charges || 1 };
+    }
+  }
   yawObject.position.set(0, CFG.playerHeight, 10);
   yawObject.rotation.y = 0;
   pitchObject.rotation.x = 0;
@@ -3204,7 +3868,7 @@ function startGame(){
     if(b.mesh.material) b.mesh.material.dispose();
   });
   bullets.length = 0;
-  setupStage(1);
+  setupStage(player.level);
   updateScoreHUD(); updateHealthHUD(); updateWeaponHUD(); updateSpeedHUD(); updateLevelHUD(); updateCoinHUD();
   updateSpecialWeaponHUD();
   applyEquippedCosmetics();
@@ -3227,9 +3891,12 @@ window.__FPS__ = { CFG, KEYMAP, scene: ()=>scene, camera:()=>camera, player, wor
   isPointerLocked: ()=>pointerLocked, isGameRunning: ()=>gameRunning, setGameRunning:(v)=>gameRunning=v,
   keys: ()=>keys, mouse: ()=>mouse, clock: ()=>clock, raycaster: ()=>raycaster, renderer: ()=>renderer,
 };
-document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('startBtn').addEventListener('click', ()=>startGame(null));
+document.getElementById('continueBtn').addEventListener('click', ()=>startGame(getRunSave()));
 init();
+updateContinueBtn();
 animate();
+// build: shop weapon upgrades + gun models v2
 })();
 </script>
 </body>
